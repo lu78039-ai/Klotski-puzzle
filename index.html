@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>華容道 - 關卡與金榜系統</title>
+    <style>
+        :root {
+            --header-height: 8vh;
+            --wrapper-padding: 4vh;
+            --body-padding: 4vh;
+            
+            /* 精準計算垂直保留空間，確保在 16:9 UHD (3840x2160) 下方絕對不會裁切 */
+            --vertical-reserved: calc(var(--header-height) + var(--wrapper-padding) + var(--body-padding) + 10px);
+            --max-board-height: calc(100vh - var(--vertical-reserved));
+            --max-board-width: 45vw;
+            
+            /* 棋盤寬度自動適應高度限制與寬度限制 */
+            --board-width: min(var(--max-board-width), calc(var(--max-board-height) * 0.8));
+            --board-height: calc(var(--board-width) * 1.25);
+            
+            --cell-size: calc(var(--board-width) / 4);
+            --gap: min(10px, calc(var(--board-width) * 0.02));
+        }
+
+        body {
+            margin: 0;
+            padding: calc(var(--body-padding) / 2);
+            background-color: #2c3e50;
+            font-family: 'Microsoft JhengHei', 'PingFang TC', sans-serif;
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: stretch;
+            gap: 2vw;
+            height: 100vh;
+            box-sizing: border-box;
+            overflow: hidden;
+            touch-action: none; /* 攔截全域雙指縮放與拖曳 */
+        }
+
+        /* 中間遊戲區 */
+        #center-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+        }
+
+        #header {
+            text-align: center;
+            color: #ecf0f1;
+            height: var(--header-height);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+        }
+
+        #header h1 {
+            margin: 0;
+            font-size: clamp(1.5rem, calc(var(--header-height) * 0.6), 4rem);
+            letter-spacing: 2px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        #board-wrapper {
+            background-color: #5a3c18;
+            background-image: linear-gradient(45deg, #4e3215, #6b471c);
+            padding: calc(var(--wrapper-padding) / 2);
+            border-radius: 15px;
+            box-shadow: 0 15px 30px rgba(0,0,0,0.5), inset 0 2px 4px rgba(255,255,255,0.2);
+            border: 4px solid #3a240f;
+            position: relative;
+        }
+
+        #board {
+            width: var(--board-width);
+            height: var(--board-height);
+            background-color: #a47e5b;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.6);
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        #exit {
+            position: absolute;
+            bottom: 0;
+            left: 25%;
+            width: 50%;
+            height: 12px;
+            background-color: #2ecc71;
+            box-shadow: 0 0 15px #2ecc71;
+            border-radius: 10px 10px 0 0;
+            opacity: 0.8;
+            z-index: 1;
+        }
+
+        /* 棋子樣式 */
+        .piece {
+            width: calc(var(--cell-size) * var(--w) - var(--gap));
+            height: calc(var(--cell-size) * var(--h) - var(--gap));
+            position: absolute;
+            left: calc(var(--gap) / 2);
+            top: calc(var(--gap) / 2);
+            transform: translate(
+                calc(var(--cell-size) * var(--x) + var(--drag-x, 0px)), 
+                calc(var(--cell-size) * var(--y) + var(--drag-y, 0px))
+            );
+            transition: transform 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            /* 在 UHD 螢幕自動放大字體 */
+            font-size: clamp(1rem, calc(var(--board-width) * 0.07), 6rem);
+            font-weight: bold;
+            user-select: none;
+            cursor: grab;
+            background: linear-gradient(135deg, #f0c286, #caa26f);
+            border: 2px solid #8b5a2b;
+            border-radius: 8px;
+            box-shadow: inset 1px 1px 3px rgba(255,255,255,0.6), inset -1px -1px 3px rgba(0,0,0,0.2), 2px 4px 6px rgba(0,0,0,0.4);
+            color: #4e342e;
+            text-shadow: 1px 1px 0 rgba(255,255,255,0.4);
+            box-sizing: border-box;
+            z-index: 10;
+        }
+
+        .piece.dragging {
+            transition: none;
+            cursor: grabbing;
+            z-index: 100;
+            box-shadow: inset 1px 1px 3px rgba(255,255,255,0.6), inset -1px -1px 3px rgba(0,0,0,0.2), 6px 12px 18px rgba(0,0,0,0.6);
+            filter: brightness(1.1);
+        }
+
+        .piece[data-type="cao"] {
+            background: linear-gradient(135deg, #e67e22, #d35400);
+            color: white;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+            border-color: #a04000;
+            font-size: clamp(1.5rem, calc(var(--board-width) * 0.12), 8rem);
+        }
+
+        .piece[data-type="h"], .piece[data-type="v"] {
+            background: linear-gradient(135deg, #f39c12, #e67e22);
+            border-color: #b9770e;
+            color: #fdf2e9;
+        }
+
+        .piece[data-type="v"] {
+            writing-mode: vertical-rl;
+            text-orientation: upright;
+            letter-spacing: 5px;
+        }
+
+        .piece[data-type="h"] {
+            letter-spacing: 15px;
+        }
+
+        /* 左右面板共用樣式 */
+        .side-panel {
+            flex: 1;
+            max-width: 400px;
+            min-width: 250px;
+            background: #34495e;
+            border-radius: 15px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+            color: #ecf0f1;
+            overflow-y: auto;
+        }
+
+        .side-panel h2 {
+            text-align: center;
+            margin-top: 0;
+            border-bottom: 2px solid #7f8c8d;
+            padding-bottom: 10px;
+            color: #f1c40f;
+            font-size: 1.8rem;
+        }
+
+        /* 左側金榜系統 */
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+            background: #2c3e50;
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        .input-group label {
+            font-weight: bold;
+            color: #bdc3c7;
+        }
+
+        .input-group input {
+            padding: 10px;
+            font-size: 1.2rem;
+            border: 2px solid #7f8c8d;
+            background: #ecf0f1;
+            color: #2c3e50;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .current-stats {
+            display: flex;
+            justify-content: space-around;
+            font-size: 1.2rem;
+            background: #1abc9c;
+            padding: 15px;
+            border-radius: 10px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            box-shadow: inset 0 -3px 0 rgba(0,0,0,0.2);
+            color: white;
+        }
+
+        .leaderboard-container {
+            flex: 1;
+            background: #2c3e50;
+            border-radius: 10px;
+            padding: 15px;
+            overflow-y: auto;
+        }
+
+        .leaderboard-container h3 {
+            margin-top: 0;
+            text-align: center;
+            color: #3498db;
+        }
+
+        #leaderboard-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        #leaderboard-list li {
+            display: flex;
+            align-items: center;
+            background: #3b5268;
+            padding: 10px;
+            border-radius: 8px;
+            gap: 10px;
+            font-size: 1.1rem;
+        }
+
+        .medal {
+            display: inline-block;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            line-height: 28px;
+            text-align: center;
+            font-size: 0.9rem;
+            color: #fff;
+            font-weight: bold;
+            text-shadow: 1px 1px 1px rgba(0,0,0,0.3);
+            flex-shrink: 0;
+        }
+        .medal.gold { background: #f1c40f; }
+        .medal.silver { background: #bdc3c7; }
+        .medal.bronze { background: #cd7f32; }
+        .medal.normal { background: #7f8c8d; }
+
+        #leaderboard-list .name {
+            flex: 1;
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #leaderboard-list .score {
+            text-align: right;
+            color: #f1c40f;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        #leaderboard-list .score small {
+            color: #bdc3c7;
+            font-weight: normal;
+            font-size: 0.8rem;
+            margin-left: 5px;
+        }
+
+        #leaderboard-list .empty {
+            text-align: center;
+            color: #7f8c8d;
+            background: transparent;
+            justify-content: center;
+        }
+
+        /* 右側關卡選擇 */
+        #level-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 5px;
+        }
+
+        .level-btn {
+            padding: 15px;
+            font-size: 1.1rem;
+            background: #2980b9;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: left;
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        .level-btn:active {
+            transform: scale(0.98);
+        }
+
+        .level-btn.active {
+            background: #e67e22;
+            font-weight: bold;
+            box-shadow: inset 4px 0 0 #f1c40f;
+        }
+
+        #reset-btn {
+            width: 100%;
+            padding: 15px;
+            font-size: 1.4rem;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: transform 0.1s, background-color 0.2s;
+            flex-shrink: 0;
+        }
+
+        #reset-btn:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        /* 勝利彈窗 */
+        #victory-modal {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: #ecf0f1;
+            padding: 40px 60px;
+            border-radius: 20px;
+            text-align: center;
+            color: #2c3e50;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes popIn {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .modal-content h2 { 
+            font-size: clamp(2rem, 5vw, 4rem); 
+            margin-top: 0; 
+            color: #e74c3c;
+        }
+
+        .modal-content p { 
+            font-size: clamp(1.2rem, 3vw, 2rem); 
+            margin: 10px 0;
+        }
+
+        #play-again-btn {
+            margin-top: 20px;
+            padding: 15px 30px;
+            font-size: clamp(1.2rem, 3vw, 2rem);
+            background: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: transform 0.1s;
+        }
+
+        #play-again-btn:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        /* 手機與平板直向相容性 (響應式核心) */
+        @media (max-aspect-ratio: 4/3) {
+            body {
+                flex-direction: column;
+                align-items: center;
+                justify-content: flex-start;
+                height: auto;
+                min-height: 100vh;
+                overflow-y: auto;
+                touch-action: auto; /* 恢復系統層級上下滾動 */
+            }
+
+            #center-panel {
+                order: -1; /* 確保遊戲區域永遠在最上方 */
+                width: 100%;
+                margin-bottom: 3vh;
+            }
+
+            .side-panel {
+                width: 100%;
+                max-width: 600px;
+                flex: none;
+                margin-bottom: 3vh;
+                height: auto;
+                max-height: none;
+            }
+            
+            #level-grid {
+                max-height: 40vh; /* 避免按鈕區無限拉長 */
+            }
+
+            :root {
+                --max-board-width: 92vw;
+                --max-board-height: 60vh; /* 縮減棋盤高度，讓下方 UI 露出 */
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="side-panel" id="left-panel">
+    <h2>英雄金榜</h2>
+    <div class="input-group">
+        <label>挑戰者姓名：</label>
+        <input type="text" id="player-name" value="無名氏" maxlength="10">
+    </div>
+    <div class="current-stats">
+        <div>時間：<span id="timer">00:00</span></div>
+        <div>步數：<span id="moves">0</span></div>
+    </div>
+    <div class="leaderboard-container">
+        <h3 id="lb-title">第 1 關 排行榜</h3>
+        <ul id="leaderboard-list">
+            <!-- 動態生成排行榜 -->
+        </ul>
+    </div>
+</div>
+
+<div id="center-panel">
+    <div id="header">
+        <h1>華容道</h1>
+    </div>
+    <div id="board-wrapper">
+        <div id="board"></div>
+    </div>
+</div>
+
+<div class="side-panel" id="right-panel">
+    <h2>關卡選擇</h2>
+    <div id="level-grid">
+        <!-- 動態生成關卡按鈕 -->
+    </div>
+    <button id="reset-btn">重新開始</button>
+</div>
+
+<div id="victory-modal" style="display:none;">
+    <div class="modal-content">
+        <h2>挑戰成功</h2>
+        <p>曹操已順利脫逃！</p>
+        <p>總共步數：<span id="final-moves"></span> 步</p>
+        <p>完成時間：<span id="final-time"></span></p>
+        <button id="play-again-btn">再玩一次</button>
+    </div>
+</div>
+
+<script>
+    /**
+     * 華容道關卡與金榜系統
+     */
+
+    const levelData = [
+        { name: "橫刀立馬", cao:[1,0], h:[1,2], v:[[0,0],[3,0],[0,2],[3,2]], s:[[1,3],[2,3],[0,4],[3,4]] },
+        { name: "指揮若定", cao:[1,0], h:[1,4], v:[[0,0],[3,0],[0,2],[3,2]], s:[[1,2],[2,2],[1,3],[2,3]] },
+        { name: "將擁曹瞞", cao:[1,0], h:[1,2], v:[[0,0],[3,0],[0,2],[3,2]], s:[[0,4],[1,4],[2,4],[3,4]] },
+        { name: "齊頭並進", cao:[1,0], h:[1,3], v:[[0,0],[3,0],[0,2],[3,2]], s:[[1,2],[2,2],[0,4],[3,4]] },
+        { name: "兵將連環", cao:[1,0], h:[1,3], v:[[0,0],[3,0],[0,2],[3,2]], s:[[0,4],[1,4],[2,4],[3,4]] },
+        { name: "左右逢源", cao:[1,0], h:[1,2], v:[[0,0],[3,0],[1,3],[2,3]], s:[[0,2],[3,2],[0,3],[3,3]] },
+        { name: "雙將擋路", cao:[1,0], h:[1,4], v:[[0,0],[3,0],[1,2],[2,2]], s:[[0,2],[3,2],[0,3],[3,3]] },
+        { name: "邊線埋伏", cao:[1,0], h:[1,4], v:[[0,0],[3,0],[0,2],[3,2]], s:[[1,2],[2,2],[0,4],[3,4]] },
+        { name: "兩翼齊飛", cao:[1,0], h:[1,2], v:[[0,0],[3,0],[0,3],[3,3]], s:[[0,2],[3,2],[1,4],[2,4]] },
+        { name: "背水一戰", cao:[1,0], h:[1,2], v:[[0,2],[3,2],[1,3],[2,3]], s:[[0,0],[3,0],[0,1],[3,1]] }
+    ];
+    const vNames = ['趙雲', '張飛', '馬超', '黃忠'];
+
+    let currentLevelIndex = 0;
+    let pieces = [];
+    let board = Array.from({length: 5}, () => Array(4).fill(null));
+    let moves = 0;
+    
+    let timerInterval = null;
+    let secondsElapsed = 0;
+    let isPlaying = false;
+
+    let draggingPiece = null;
+    let startX = 0, startY = 0;
+    let bounds = null;
+    let axisLocked = null;
+
+    function initGame() {
+        buildLevelMenu();
+        loadLevel(0);
+    }
+
+    function buildLevelMenu() {
+        const grid = document.getElementById('level-grid');
+        grid.innerHTML = '';
+        levelData.forEach((level, index) => {
+            const btn = document.createElement('button');
+            btn.className = 'level-btn';
+            btn.textContent = `第 ${index + 1} 關：${level.name}`;
+            btn.addEventListener('click', () => {
+                loadLevel(index);
+            });
+            grid.appendChild(btn);
+        });
+    }
+
+    function loadLevel(index) {
+        currentLevelIndex = index;
+        const data = levelData[index];
+        pieces = [];
+        
+        pieces.push({ id: 'cao_cao', name: '曹操', w: 2, h: 2, x: data.cao[0], y: data.cao[1], type: 'cao' });
+        pieces.push({ id: 'guan_yu', name: '關羽', w: 2, h: 1, x: data.h[0], y: data.h[1], type: 'h' });
+        data.v.forEach((pos, i) => {
+            pieces.push({ id: `v_${i}`, name: vNames[i], w: 1, h: 2, x: pos[0], y: pos[1], type: 'v' });
+        });
+        data.s.forEach((pos, i) => {
+            pieces.push({ id: `s_${i}`, name: '卒', w: 1, h: 1, x: pos[0], y: pos[1], type: 's' });
+        });
+        
+        moves = 0;
+        stopTimer();
+        secondsElapsed = 0;
+        updateTimerDisplay();
+        updateMovesDisplay();
+        
+        renderPieces();
+        updateBoardState();
+        renderLeaderboard();
+        
+        document.querySelectorAll('.level-btn').forEach((btn, i) => {
+            btn.classList.toggle('active', i === index);
+        });
+        document.getElementById('victory-modal').style.display = 'none';
+    }
+
+    function renderPieces() {
+        const boardEl = document.getElementById('board');
+        boardEl.innerHTML = '<div id="exit"></div>';
+        
+        pieces.forEach(p => {
+            const el = document.createElement('div');
+            el.className = 'piece';
+            el.id = p.id;
+            el.dataset.type = p.type;
+            el.textContent = p.name;
+            el.style.setProperty('--w', p.w);
+            el.style.setProperty('--h', p.h);
+            el.style.setProperty('--x', p.x);
+            el.style.setProperty('--y', p.y);
+            
+            el.addEventListener('pointerdown', onPointerDown);
+            boardEl.appendChild(el);
+        });
+    }
+
+    function updateBoardState() {
+        for (let y = 0; y < 5; y++) {
+            for (let x = 0; x < 4; x++) {
+                board[y][x] = null;
+            }
+        }
+        pieces.forEach(p => {
+            for (let y = p.y; y < p.y + p.h; y++) {
+                for (let x = p.x; x < p.x + p.w; x++) {
+                    board[y][x] = p.id;
+                }
+            }
+        });
+    }
+
+    function getBounds(p) {
+        let minX = 0, maxX = 0, minY = 0, maxY = 0;
+        let x = p.x;
+        while (x > 0) {
+            let canMove = true;
+            for (let y = p.y; y < p.y + p.h; y++) {
+                if (board[y][x - 1] !== null && board[y][x - 1] !== p.id) { canMove = false; break; }
+            }
+            if (canMove) { x--; minX--; } else break;
+        }
+        x = p.x;
+        while (x + p.w < 4) {
+            let canMove = true;
+            for (let y = p.y; y < p.y + p.h; y++) {
+                if (board[y][x + p.w] !== null && board[y][x + p.w] !== p.id) { canMove = false; break; }
+            }
+            if (canMove) { x++; maxX++; } else break;
+        }
+        let y = p.y;
+        while (y > 0) {
+            let canMove = true;
+            for (let cx = p.x; cx < p.x + p.w; cx++) {
+                if (board[y - 1][cx] !== null && board[y - 1][cx] !== p.id) { canMove = false; break; }
+            }
+            if (canMove) { y--; minY--; } else break;
+        }
+        y = p.y;
+        while (y + p.h < 5) {
+            let canMove = true;
+            for (let cx = p.x; cx < p.x + p.w; cx++) {
+                if (board[y + p.h][cx] !== null && board[y + p.h][cx] !== p.id) { canMove = false; break; }
+            }
+            if (canMove) { y++; maxY++; } else break;
+        }
+        return { minX, maxX, minY, maxY };
+    }
+
+    function onPointerDown(e) {
+        if (e.target.classList.contains('piece')) {
+            draggingPiece = pieces.find(p => p.id === e.target.id);
+            if (!draggingPiece) return;
+            
+            startX = e.clientX;
+            startY = e.clientY;
+            bounds = getBounds(draggingPiece);
+            axisLocked = null; 
+            
+            e.target.classList.add('dragging');
+            e.target.setPointerCapture(e.pointerId); 
+            e.preventDefault(); 
+        }
+    }
+
+    function onPointerMove(e) {
+        if (!draggingPiece) return;
+        
+        let deltaX = e.clientX - startX;
+        let deltaY = e.clientY - startY;
+        
+        if (!axisLocked) {
+            if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
+                if (Math.abs(deltaX) > Math.abs(deltaY)) {
+                    if (bounds.minX < 0 || bounds.maxX > 0) axisLocked = 'x';
+                    else if (bounds.minY < 0 || bounds.maxY > 0) axisLocked = 'y';
+                } else {
+                    if (bounds.minY < 0 || bounds.maxY > 0) axisLocked = 'y';
+                    else if (bounds.minX < 0 || bounds.maxX > 0) axisLocked = 'x';
+                }
+            }
+            if (!axisLocked) return;
+        }
+        
+        const boardEl = document.getElementById('board');
+        const cellSize = boardEl.clientWidth / 4;
+        
+        let dragPxX = 0;
+        let dragPxY = 0;
+        
+        if (axisLocked === 'x') {
+            dragPxX = Math.max(bounds.minX * cellSize, Math.min(bounds.maxX * cellSize, deltaX));
+        } else if (axisLocked === 'y') {
+            dragPxY = Math.max(bounds.minY * cellSize, Math.min(bounds.maxY * cellSize, deltaY));
+        }
+        
+        const el = document.getElementById(draggingPiece.id);
+        el.style.setProperty('--drag-x', `${dragPxX}px`);
+        el.style.setProperty('--drag-y', `${dragPxY}px`);
+    }
+
+    function onPointerUp(e) {
+        if (!draggingPiece) return;
+        
+        const el = document.getElementById(draggingPiece.id);
+        el.classList.remove('dragging');
+        el.releasePointerCapture(e.pointerId);
+        
+        const boardEl = document.getElementById('board');
+        const cellSize = boardEl.clientWidth / 4;
+        
+        let dragPxX = parseFloat(el.style.getPropertyValue('--drag-x') || 0);
+        let dragPxY = parseFloat(el.style.getPropertyValue('--drag-y') || 0);
+        
+        let moveCellsX = Math.round(dragPxX / cellSize);
+        let moveCellsY = Math.round(dragPxY / cellSize);
+        
+        if (moveCellsX !== 0 || moveCellsY !== 0) {
+            if (!isPlaying) startTimer();
+            
+            draggingPiece.x += moveCellsX;
+            draggingPiece.y += moveCellsY;
+            
+            updateBoardState();
+            moves++;
+            updateMovesDisplay();
+            checkWin();
+        }
+        
+        el.style.setProperty('--drag-x', `0px`);
+        el.style.setProperty('--drag-y', `0px`);
+        el.style.setProperty('--x', draggingPiece.x);
+        el.style.setProperty('--y', draggingPiece.y);
+        
+        draggingPiece = null;
+    }
+
+    function startTimer() {
+        if (isPlaying) return;
+        isPlaying = true;
+        timerInterval = setInterval(() => {
+            secondsElapsed++;
+            updateTimerDisplay();
+        }, 1000);
+    }
+
+    function stopTimer() {
+        isPlaying = false;
+        clearInterval(timerInterval);
+    }
+
+    function updateTimerDisplay() {
+        const m = Math.floor(secondsElapsed / 60).toString().padStart(2, '0');
+        const s = (secondsElapsed % 60).toString().padStart(2, '0');
+        document.getElementById('timer').textContent = `${m}:${s}`;
+    }
+
+    function updateMovesDisplay() {
+        document.getElementById('moves').textContent = moves;
+    }
+
+    function saveRecord() {
+        let nameInput = document.getElementById('player-name').value.trim();
+        if (!nameInput) nameInput = "無名氏";
+        
+        let records = JSON.parse(localStorage.getItem('klotski_leaderboard') || '{}');
+        if (!records[currentLevelIndex]) records[currentLevelIndex] = [];
+        
+        records[currentLevelIndex].push({
+            name: nameInput,
+            moves: moves,
+            time: secondsElapsed
+        });
+        
+        records[currentLevelIndex].sort((a, b) => {
+            if (a.moves !== b.moves) return a.moves - b.moves;
+            return a.time - b.time;
+        });
+        
+        records[currentLevelIndex] = records[currentLevelIndex].slice(0, 10);
+        localStorage.setItem('klotski_leaderboard', JSON.stringify(records));
+        
+        renderLeaderboard();
+    }
+
+    function renderLeaderboard() {
+        const levelName = levelData[currentLevelIndex].name;
+        document.getElementById('lb-title').textContent = `第 ${currentLevelIndex + 1} 關：${levelName}`;
+        
+        let records = JSON.parse(localStorage.getItem('klotski_leaderboard') || '{}');
+        let levelRecords = records[currentLevelIndex] || [];
+        
+        const listEl = document.getElementById('leaderboard-list');
+        listEl.innerHTML = '';
+        
+        if (levelRecords.length === 0) {
+            listEl.innerHTML = '<li class="empty">尚無紀錄，等你來挑戰！</li>';
+            return;
+        }
+        
+        levelRecords.forEach((r, i) => {
+            const m = Math.floor(r.time / 60).toString().padStart(2, '0');
+            const s = (r.time % 60).toString().padStart(2, '0');
+            
+            let medalHtml = '';
+            if (i === 0) medalHtml = '<span class="medal gold">金</span>';
+            else if (i === 1) medalHtml = '<span class="medal silver">銀</span>';
+            else if (i === 2) medalHtml = '<span class="medal bronze">銅</span>';
+            else medalHtml = `<span class="medal normal">${i + 1}</span>`;
+            
+            listEl.innerHTML += `
+                <li>
+                    ${medalHtml}
+                    <div class="name">${r.name}</div>
+                    <div class="score">${r.moves} 步 <small>(${m}:${s})</small></div>
+                </li>
+            `;
+        });
+    }
+
+    function checkWin() {
+        const cao = pieces.find(p => p.id === 'cao_cao');
+        if (cao.x === 1 && cao.y === 3) {
+            stopTimer();
+            setTimeout(() => {
+                saveRecord();
+                document.getElementById('final-moves').textContent = moves;
+                const m = Math.floor(secondsElapsed / 60).toString().padStart(2, '0');
+                const s = (secondsElapsed % 60).toString().padStart(2, '0');
+                document.getElementById('final-time').textContent = `${m}:${s}`;
+                document.getElementById('victory-modal').style.display = 'flex';
+            }, 300);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        initGame();
+        
+        document.getElementById('reset-btn').addEventListener('click', () => loadLevel(currentLevelIndex));
+        document.getElementById('play-again-btn').addEventListener('click', () => loadLevel(currentLevelIndex));
+        
+        document.addEventListener('pointermove', onPointerMove, {passive: false});
+        document.addEventListener('pointerup', onPointerUp);
+    });
+
+</script>
+</body>
+</html>
