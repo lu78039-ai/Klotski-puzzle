@@ -641,8 +641,62 @@
     let bounds = null;
     let axisLocked = null;
 
+    function saveProgress() {
+        if (!pieces || pieces.length === 0) return;
+        const progress = {
+            levelIndex: currentLevelIndex,
+            playerName: document.getElementById('player-name').value,
+            moves: moves,
+            secondsElapsed: secondsElapsed,
+            pieces: pieces.map(p => ({ id: p.id, x: p.x, y: p.y }))
+        };
+        localStorage.setItem('klotski_progress', JSON.stringify(progress));
+    }
+
+    function restoreLevel(progress) {
+        currentLevelIndex = progress.levelIndex || 0;
+        const data = levelData[currentLevelIndex] || levelData[0];
+        pieces = [];
+        
+        pieces.push({ id: 'cao_cao', name: '曹操', w: 2, h: 2, x: data.cao[0], y: data.cao[1], type: 'cao' });
+        pieces.push({ id: 'guan_yu', name: '關羽', w: 2, h: 1, x: data.h[0], y: data.h[1], type: 'h' });
+        data.v.forEach((pos, i) => pieces.push({ id: `v_${i}`, name: vNames[i], w: 1, h: 2, x: pos[0], y: pos[1], type: 'v' }));
+        data.s.forEach((pos, i) => pieces.push({ id: `s_${i}`, name: '卒', w: 1, h: 1, x: pos[0], y: pos[1], type: 's' }));
+        
+        if (progress.pieces) {
+            progress.pieces.forEach(sp => {
+                const p = pieces.find(p => p.id === sp.id);
+                if (p) { p.x = sp.x; p.y = sp.y; }
+            });
+        }
+        
+        moves = progress.moves || 0;
+        secondsElapsed = progress.secondsElapsed || 0;
+        stopTimer();
+        updateTimerDisplay();
+        updateMovesDisplay();
+        
+        renderPieces();
+        updateBoardState();
+        renderLeaderboard();
+        
+        document.querySelectorAll('.level-btn').forEach((btn, i) => {
+            btn.classList.toggle('active', i === currentLevelIndex);
+        });
+        document.getElementById('victory-modal').style.display = 'none';
+    }
+
     function initGame() {
         buildLevelMenu();
+        const saved = localStorage.getItem('klotski_progress');
+        if (saved) {
+            try {
+                const progress = JSON.parse(saved);
+                document.getElementById('player-name').value = progress.playerName || '無名氏';
+                restoreLevel(progress);
+                return;
+            } catch(e) {}
+        }
         loadLevel(0);
     }
 
@@ -688,6 +742,7 @@
             btn.classList.toggle('active', i === index);
         });
         document.getElementById('victory-modal').style.display = 'none';
+        saveProgress();
     }
 
     function renderPieces() {
@@ -839,6 +894,7 @@
             updateBoardState();
             moves++;
             updateMovesDisplay();
+            saveProgress();
             checkWin();
         }
         
@@ -856,6 +912,7 @@
         timerInterval = setInterval(() => {
             secondsElapsed++;
             updateTimerDisplay();
+            saveProgress();
         }, 1000);
     }
 
@@ -939,6 +996,7 @@
             stopTimer();
             setTimeout(() => {
                 saveRecord();
+                localStorage.removeItem('klotski_progress');
                 document.getElementById('final-moves').textContent = moves;
                 const m = Math.floor(secondsElapsed / 60).toString().padStart(2, '0');
                 const s = (secondsElapsed % 60).toString().padStart(2, '0');
@@ -953,6 +1011,8 @@
         
         document.getElementById('reset-btn').addEventListener('click', () => loadLevel(currentLevelIndex));
         document.getElementById('play-again-btn').addEventListener('click', () => loadLevel(currentLevelIndex));
+        
+        document.getElementById('player-name').addEventListener('input', saveProgress);
 
         // 規則說明彈窗綁定
         document.getElementById('rules-btn').addEventListener('click', () => {
